@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
-matplotlib.use("TkAgg")
 from matplotlib import style
 import Tkinter as Tk	
 import random 
@@ -13,8 +12,20 @@ import socket
 import numpy as np
 import random
 
+#some initial stylistic choices
+matplotlib.use("TkAgg")
 style.use("ggplot") 		
 FONT = ("Helvetica", 12)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+'''
+
+The GUI Part of Things
+
+'''
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 class GuiPart(Tk.Tk):
 
@@ -24,6 +35,7 @@ class GuiPart(Tk.Tk):
 		
 		#Extensive __init__ to set up buttons, grid locations, subplots, etc. Considering putting this in a seperate file.
 		
+		#Placed in dictionary, for ease of future changes. 
 		gridDict = {	'byeButton':		[0,0],		#[row,column]
 				'GreetButton':		[0,1],
 				'CurrentXLabel':	[1,0],
@@ -111,18 +123,22 @@ class GuiPart(Tk.Tk):
 		    		self.currentYVar.set(round(msg,5)) #Updates the X and Y Current Position Labels
 				self.getData(msg)		   #Calls the getData function, which extracts data and updates plot
 		     		#print msg
+				
 			except Queue.Empty:
 		        # just on general principles, although we don't
 		        # expect this branch to be taken in this case
 		        	pass
 	
-	def getData(self,textdata):
-		
-		angle = float(textdata)
+	def getData(self,msg):
+		#Process the incoming data - extract headers, conver str to float, etc.
+		#This function will be dependent on exactly the format coming from the motor controller
+		angle = float(msg)
 		self.updatePlot(angle)
 	
 	def updatePlot(self,angle):
 		
+		#Currently this just draws a line that goes in a circle, assumung updatePlot passes 
+		#information in such as the angle of the system. 
 		r = 5
 		
 		x = r * np.cos(angle)
@@ -134,9 +150,20 @@ class GuiPart(Tk.Tk):
 		self.canvas.draw()
 	
 	def dataSend(self,message):
+		
 		#Send information to Pi. This should probably be happening in ThreadedClient
 		datasendsock.sendto(message,(piIP,sendport))
 		
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+'''
+
+The Thread Handler and I/O Part of Things
+
+'''
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 class ThreadedClient:
 	def __init__(self, master):
 		self.master = master
@@ -155,33 +182,38 @@ class ThreadedClient:
         # Start the periodic call in the GUI to check if the queue contains
         # anything
         self.periodicCall()
+	
+	def periodicCall(self):
+		self.gui.processIncoming()
+        	if not self.running:
+            		# This is the brutal stop of the system. You may want to do
+            		# some cleanup before actually shutting it down.
+            		datasendsock.close()
+            		datagetsock.close()
+			import sys
+			sys.exit(1)
+		self.master.after(50, self.periodicCall) #This is supposed to make the thread wait 50ms before calling the 
+							 #queue again, but it doesn't?? 
+	
+	def workerThread1(self):
+		while self.running:
 
-    def periodicCall(self):
-  
-        self.gui.processIncoming()
-        if not self.running:
-            # This is the brutal stop of the system. You may want to do
-            # some cleanup before actually shutting it down.
-            #datasendsock.close()
-            #datagetsock.close()
-            import sys
-            sys.exit(1)
-            
-        self.master.after(50, self.periodicCall)
-
-    def workerThread1(self):
-  
-        while self.running:
-
-            #msg = datagetsock.recvfrom(8)[0] #8 because that's the number of bytes the server sends about angle info
-            msg = random.random()
-            time.sleep(0.2)
-            self.queue.put(msg)
-            pass
-    
-    def endApplication(self):
-        self.running = 0
+            		#msg = datagetsock.recvfrom(8)[0] #8 because that's the number of bytes the server sends about angle info
+            		msg = random.random()
+			self.queue.put(msg)
+	
+	def endApplication(self):
+        	self.running = 0
 		
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+'''
+
+The Function Calling and Network Setup Part of Things. 
+
+'''
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 piIP = "10.42.0.208"
 datagetsock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
@@ -191,7 +223,6 @@ datagetsock.bind(('',getport)) #Client needs to bind to socket, server doesn't
 datasendsock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 sendport = 12345
 
-#datasock.recvfrom(10)
 
 		
 root = Tk.Tk()
