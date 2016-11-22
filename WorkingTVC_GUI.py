@@ -11,11 +11,9 @@ import Queue
 import time
 import socket
 import numpy as np
-
 import random
 
-style.use("ggplot")
-
+style.use("ggplot") 		
 FONT = ("Helvetica", 12)
 
 class GuiPart(Tk.Tk):
@@ -23,6 +21,8 @@ class GuiPart(Tk.Tk):
 	def __init__(self,master,queue,endCommand):
 		
 		self.queue = queue
+		
+		#Extensive __init__ to set up buttons, grid locations, subplots, etc. Considering putting this in a seperate file.
 		
 		gridDict = {	'byeButton':		[0,0],		#[row,column]
 				'GreetButton':		[0,1],
@@ -77,7 +77,8 @@ class GuiPart(Tk.Tk):
         	self.dropMenu1 = Tk.OptionMenu(master, self.dropVar, *optionList)
         	self.dropMenu1.grid(row = 5, column = 0)
       	
-      	
+      		#Below is the setup for all the subplots. 
+		
 		self.canvasFig = plt.figure(1)
         	fig = Figure(figsize=(5, 5), dpi=100)
         	self.figSubPlot1 = fig.add_subplot(211)
@@ -88,7 +89,7 @@ class GuiPart(Tk.Tk):
         	self.line1, = self.figSubPlot1.plot(x,y)
         	self.line2, = self.figSubPlot2.plot(x,y)
         	self.canvas = FigureCanvasTkAgg(fig, master=master)
-        	
+		#Subplot Initialization 
         	ax1 = self.canvas.figure.axes[0]
 		ax1.set_title("Polar Plot of current Angle",fontsize = 12)
 		ax1.set_xlim(-6.5,6.5)
@@ -97,32 +98,28 @@ class GuiPart(Tk.Tk):
 		ax2.set_xlim(-6.5,6.5)
 		ax2.set_ylim(-6.5,6.5)
 		ax2.set_title('Negative Polar Plot of Current Angle',fontsize = 12)
-		
         	self.canvas.show()
         	self.canvas.get_tk_widget().grid(row = 6 ,column = 0, columnspan = 2, sticky = 'S')
         	
 	def processIncoming(self):
 	
+	
     		while self.queue.qsize():
-		    try:
-		        msg = self.queue.get(0) #Gets first object from queue
-		    	#self.getData(msg)
-		    	self.currentXVar.set(round(msg,5))
-		    	self.currentYVar.set(round(msg,5))
-		     	print msg
-		    except Queue.Empty:
+			try:
+		        	msg = self.queue.get(0) 	   #Gets first object from queue
+		    		self.currentXVar.set(round(msg,5))
+		    		self.currentYVar.set(round(msg,5)) #Updates the X and Y Current Position Labels
+				self.getData(msg)		   #Calls the getData function, which extracts data and updates plot
+		     		#print msg
+			except Queue.Empty:
 		        # just on general principles, although we don't
 		        # expect this branch to be taken in this case
-		        pass
+		        	pass
 	
 	def getData(self,textdata):
-
+		
 		angle = float(textdata)
 		self.updatePlot(angle)
-			
-	def printstuff(self):
-	
-		print "sup wid it"
 	
 	def updatePlot(self,angle):
 		
@@ -137,18 +134,14 @@ class GuiPart(Tk.Tk):
 		self.canvas.draw()
 	
 	def dataSend(self,message):
-		datasendsock.sendto(message,(piIP,sendport))#Send message to Pi
-		
+		#Send information to Pi. This should probably be happening in ThreadedClient
+		datasendsock.sendto(message,(piIP,sendport))
 		
 class ThreadedClient:
-
-    def __init__(self, master):
-    
-      
-        self.master = master
-
-        # Create the queue
-        self.queue = Queue.Queue()
+	def __init__(self, master):
+		self.master = master
+	        # Create the queue
+        	self.queue = Queue.Queue()
 
         # Set up the GUI part
         self.gui = GuiPart(master, self.queue, self.endApplication)
