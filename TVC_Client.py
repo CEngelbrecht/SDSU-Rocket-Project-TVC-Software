@@ -170,18 +170,17 @@ class ThreadedClient:
 	        # Create the queue
         	self.queue = Queue.Queue()
 
-        # Set up the GUI part
-        self.gui = GuiPart(master, self.queue, self.endApplication)
+        	# Set up the GUI part
+        	self.gui = GuiPart(master, self.queue, self.endApplication)
 
-        # Set up the thread to do asynchronous I/O
-        # More threads can also be created and used, if necessary
-        self.running = 1
-        self.thread1 = threading.Thread(target=self.workerThread1)
-        self.thread1.start()
+        	# Set up the thread to do asynchronous I/O
+        	# More threads can also be created and used, if necessary
+        	self.running = 1
+        	self.thread1 = threading.Thread(target=self.workerThread1)
+        	self.thread1.start()
 
-        # Start the periodic call in the GUI to check if the queue contains
-        # anything
-        self.periodicCall()
+        	# Start the periodic call in the GUI to check if the queue contains anything
+        	self.periodicCall()
 	
 	def periodicCall(self):
 		self.gui.processIncoming()
