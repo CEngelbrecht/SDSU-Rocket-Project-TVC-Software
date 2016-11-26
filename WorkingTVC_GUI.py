@@ -106,6 +106,7 @@ class GuiPart(Tk.Tk):
 		self.line1, = self.figSubPlot1.plot(x,y)
 		self.line2, = self.figSubPlot2.plot(x,y)
 		self.canvas = FigureCanvasTkAgg(fig, master=master)
+		
 		ax1 = self.canvas.figure.axes[0]
 		ax1.set_title("Polar Plot of current Angle",fontsize = 12)
 		ax1.set_xlim(-6.5,6.5)
@@ -114,14 +115,17 @@ class GuiPart(Tk.Tk):
 		ax2.set_xlim(-6.5,6.5)
 		ax2.set_ylim(-6.5,6.5)
 		ax2.set_title('Negative Polar Plot of Current Angle',fontsize = 12)
+		
 		self.canvas.show()
 		self.canvas.get_tk_widget().grid(row = 6 ,column = 0, columnspan = 2, sticky = 'S')
 
 	def routineSend(self,routineNumber):
-		print routineNumber
-	    
+		#This will send command eventually to perform a routine
+		pass
+		
 	def printStuff(self):
-		print "Yup, it can print."
+		#Just checking if this button works
+		pass
 
 	def processIncomingText(self,msg):
 		
@@ -170,30 +174,28 @@ class ThreadedClient:
 		
 		self.gui = GuiPart(master, self.textQueue, self.graphQueue, self.endApplication)
 
-		self.running = 1
+		self.running = True
 		self.textThread = threading.Thread(target=self.getInfo)
 		self.graphThread = threading.Thread(target = self.getInfo)
 
 		self.textThread.start()
 		self.graphThread.start()
 
-		self.periodicCallText()
+		self.periodicCallText() #Starts periodic calls to update the text labels and graphs
 		self.periodicCallGraph()
 
 	def getInfo(self):
 		
-		while self.running:ap
+		while self.running:
 
 			#msg = datagetsock.recvfrom(8)[0] #8 because that's the number of bytes the server sends about angle info
 			msg = random.random() 
-			#print msg
 			self.textQueue.put(msg)
 			self.graphQueue.put(msg)
-			#time.sleep(5)
 
 	def periodicCallText(self):
 
-		msg = self.textQueue.get(1)
+		msg = self.textQueue.get(1) #Takes first object out of Queue, updates, calls every 10ms
 		self.gui.processIncomingText(msg)
 
 		self.master.after(10, self.periodicCallText)
