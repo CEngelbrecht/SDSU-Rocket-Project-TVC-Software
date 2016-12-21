@@ -26,6 +26,7 @@ BUFF_SIZE = 8
 def checkADC()
 
 	try: 
+
 		xFeedback = adc.readvoltage(1)
 		yFeedback = adc.readvoltage(2)
 
@@ -41,7 +42,7 @@ def checkADC()
 def MotorMove(setpoint,feedback,motor): 
 
 	#computes proportional error based on current feedback 
-	#the motor argument will define if it's X or Y to be moved. 
+	#the motor arg
 
 	error = setpoint - feedback 
 	outPut = Kp*error
@@ -78,11 +79,14 @@ def MotorMove(setpoint,feedback,motor):
 	return 1
 
 def routineA():
-	
-	#calls MotorMove as much as needed
+
+	#Does a specific routine that updates global setpoint variables
+	#calls sendToMotorX and sendToMotorY as needed
 
 def routineB():
-	#calls MotorMove as much as needed
+
+	#Does a specific routine that updates global setpoint variables
+	#calls sendToMotorX and sendToMotorY as needed
 def Zeroing():
 
 	#Individually checks X and Y setpoints and brings them to zero.
@@ -221,4 +225,54 @@ if name = "__main__":
 	while 1:
 	#main is always going to be run. 
 		main()
-		
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
