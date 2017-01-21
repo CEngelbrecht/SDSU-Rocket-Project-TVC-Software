@@ -1,3 +1,8 @@
+'''
+Don't use this! Just keeping it here for posterity.
+'''
+
+
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
