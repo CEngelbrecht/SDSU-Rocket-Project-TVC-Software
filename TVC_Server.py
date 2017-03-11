@@ -1,377 +1,281 @@
-#!/usr/bin/python
-#
-# This file is part of IvPID.
-# Copyright (C) 2015 Ivmech Mechatronics Ltd. <bilgi@ivmech.com>
-#
-# IvPID is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# IvPID is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-#title           :test_pid.py
-#description     :python pid controller test
-#author          :Caner Durmusoglu
-#date            :20151218
-#version         :0.1
-#notes           :
-#python_version  :2.7
-#dependencies    : matplotlib, numpy, scipy
-#==============================================================================
-
-import PID
-from time import time,sleep
-from datetime import datetime
-import logging 
-import random
-import multiprocessing
-import socket
-import numpy as np
 import roboclaw
 from ABE_ADCPi import ADCPi
 from ABE_helpers import ABEHelpers
+import time
+import PID
+import socket
+import numpy as np 
+import time
 
-# Get the ADC fired up
-i2c_helper = ABEHelpers()
-bus = i2c_helper.get_smbus()
-adc = ADCPi(bus, 0x68, 0x69, 12)
-
-# Open serial port for Motor Controller
-roboclaw.Open("/dev/ttyAMA0",38400)
-print("Serial port open!")
-address = 0x80
-
-#Maximum values that can be sent to the MC.
-outMax = 127
-outMin = -127
-
-'''
-Logging format is:
-TIMESTAMP,XSETPOINT,XFEEDBACK,YSETPOINT,YFEEDBACK
-
-The timestamp will be Unix timestamp. 
-'''
-
-#Change this to level = DEBUG to log everything. Filemode = 'w' makes the log overwrite
-logging.basicConfig(filename='positions.log',level=logging.DEBUG,filemode = 'w') 
-
-#Networking Setup
-data_get_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-data_get_port = 12345
-data_get_sock.bind(('',data_get_port))
-
-data_send_sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-data_send_port = 6969
-client_IP = "10.42.0.1" #This is Christian's Laptop Ubuntu IP
-BUFF_SIZE = 128
-data_send_sock.connect((client_IP,data_send_port))
-
-#Make the connections non blocking.
-data_send_sock.setblocking(0)
-data_get_sock.setblocking(0)
-
-print "Socket Bound: Awaiting Input"
-
-kp = 500
-ki = 1.5
-kd = 0.001
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-def test_pid(P,I,D,L,send_end):
-
-    pid = PID.PID(P, I, D)
-
-    pid.SetPoint=0.0
-    pid.setSampleTime(0.01)
-
-    END = L
-    feedback = 0
-
-    feedback_list = []
-    time_list = []
-    setpoint_list = []
-
-    for i in range(1, END):
-        pid.update(feedback)
-        output = pid.output
-        if pid.SetPoint > 0:
-            # feedback += (output - (1/i))
-            feedback += output + 0.1*random.random()
-        if i>9:
-            pid.SetPoint = 1
-        if i > 50:
-            pid.SetPoint = 3.5
-        if i > 150:
-            pid.SetPoint = 2.0
-        time.sleep(0.02)
-        logging.debug("Position is {}".format(feedback))
-
-        feedback_list.append(feedback)
-        setpoint_list.append(pid.SetPoint)
-        time_list.append(i)
-     
-    send_list = (feedback_list,setpoint_list) 
-
-    send_end.send(send_list)
-
-def run_routine(setpoints,P,I,D,motor):
-
-    pid = PID.PID(P,I,D)
-
-    #Don't think I need this line, but keeping it in case. 
-    #pid.SetPoint=0.0
-    pid.setSampleTime(sample_time)   
-
-    #Get initial feedbacks
-    if motor == 'X':
-        adc_num = 1
-        feedback = adc.read_voltage(adc_num)
-        print feedback    
-    elif motor == 'Y':
-        adc_num = 2
-        feedback = adc.read_voltage(adc_num)
-
-    #Loop through all setpoints passed to the function, update PID, call the MC
-    for point in setpoints: 
-
-        pid.SetPoint = point
-        pid.update(feedback)
-        output = pid.output 
-        
-        if output > outMax:
-            output = outMax
-        elif output < outMin:
-            output = outMin
-
-        #Check whether to send forward or backwards based the sign of outPut
-
-        if output >= 0:
-            if motor == 'X':
-                roboclaw.ForwardM1(address,int(output))
-            elif motor == 'Y':
-                roboclaw.ForwardM2(address,int(output))
-
-        elif output < 0:
-            output = abs(output)
-            #go backwards the same magnitude as forwards
-            if motor == 'X':
-                roboclaw.BackwardM1(address,int(output))
-            elif motor == 'Y':
-                roboclaw.BackwardM2(address,int(output))
-
-        #Get feedback, log what's going on, keep looping until all setpoints have been depleted. 
-        feedback = adc.read_voltage(adc_num)
-        logging.debug("{},{},{}".format(time.time(),pid.SetPoint,output))
-
-def one_setpoint(setpoint,feedback,P,I,D,motor):
-
-    #Maybe put this in main loop??
-    pid = PID.PID(P,I,D)
-
-    if setpoint > 4.75: 
-        setpoint = 4.75
-    elif setpoint < 0.12:
-        setpoint = 0.12
+class TVCServer():
 
-    pid.SetPoint=setpoint
-    pid.setSampleTime(sample_time)
+	def __init__(self):
 
-    pid.update(feedback)
+		#Get the ADC fired up. 
+		i2c_helper = ABEHelpers()
+		bus = i2c_helper.get_smbus()
+		self.adc = ADCPi(bus, 0x68, 0x69, 12)
 
-    output = pid.output
+		#Open the serial port for use. 
+		roboclaw.Open("/dev/ttyAMA0",38400)
+		print("Serial port open!")
+		self.address = 0x80
 
-    
-    if output > outMax:
-        output = outMax
-    elif output < outMin:
-        output = outMin
+		#Networking vars. Currently set to Christian's IP and Laptop
+		client_IP = "10.42.0.87"
+		port = 6969
+		self.server_address = (client_IP,port)
 
-    #Check whether to send forward or backwards based the sign of outPut
+		#Set the max speed of the motors. Max/min is +32767/-32767
+		self.max_speed = 20000
+		self.min_speed = -20000
 
-    if output >= 0:
-        if motor == 'X':
-            roboclaw.ForwardM1(address,int(output))
-        elif motor == 'Y':
-            roboclaw.ForwardM2(address,int(output))
+		#Scaling params. Experimentally obtained. 
+		self.adc_min = 0.600453
+		self.adc_max = 4.6000
 
-    elif output < 0:
-        output = abs(output)
-        #go backwards the same magnitude as forwards
-        if motor == 'X':
-            roboclaw.BackwardM1(address,int(output))
-        elif motor == 'Y':
-            roboclaw.BackwardM2(address,int(output))
+		self.mapped_max = 0 #Yes, max is zero and min is 100.
+		self.mapped_min = 100 #This is due to backward wiring in TVCBey and on my part.
 
-    #logging happens in main loop.
+		#Vars needed for mapping method.
+		self.adc_span = self.adc_max - self.adc_min
+		self.mapped_span = self.mapped_max - self.mapped_min
+	
+		#Initializing feedbacks
+		self.x_feedback = 0
+		self.y_feedback = 0
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		#PID Params. They're currently same for x and y
+		kp = 2500
+		ki = 50
+		kd = 0
+		sample_time = 0.001 
 
-if __name__ == "__main__":
+		#Objects from the PID.py import. See documentation there.
+		self.x_PID = PID.PID(kp,ki,kd)
+		self.y_PID = PID.PID(kp,ki,kd)
 
-    #The PID controlling sampling time, gains, and allowed error between setpoint and feedback 
-    sample_time = 0.000001
-    kp = 1000
-    ki = 1
-    kd = 0.001
-    #allowed_error = 0.005
-    #Initital Starting out point for the actuators
-    x_setpoint = 0.0
-    y_setpoint = 0.0 
-    
-    logging.info("Starting TVC Control. Time is {}".format(datetime.now()))
+		self.x_PID.setSampleTime(sample_time)
+		self.y_PID.setSampleTime(sample_time)
 
-    while 1:
+		#Zero point for actuators to balance motor
+		self.x_zero = 57 #Experimentally defined
+		self.y_zero = 56 
 
-        #Initializing message to be false after each loop. 
-        msg = False
+		self.output_error_range = 1000
 
-        #Get feedbac
-        x_feedback = adc.read_voltage(1)
-        y_feedback = adc.read_voltage(2)
-        print "x_feedback is {}, x_setpoint is {},y_feedback is {}, y_setpoint is {}".format(x_feedback,x_setpoint,y_feedback,y_setpoint)
+	def feedback_map(self,raw_feedback):
+		'''Scales raw ADC feedback between 0 and 100'''
 
-        try:
-            msg = data_get_sock.recvfrom(BUFF_SIZE)[0]
-            print "msg received: {}".format(msg)
+		scale_factor = float(raw_feedback - self.adc_min)/float(self.adc_span)
 
-        except socket.error:
-            #This means nothing was sent. Since the socket is non-blocking, trying to receive anything 
-            #will raise a socket.error exception instead of causing the program to hang. 
-            pass
+		return self.mapped_min + (scale_factor*self.mapped_span)
 
-        one_setpoint(x_setpoint,x_feedback,kp,ki,kd,'X')
-        one_setpoint(y_setpoint,y_feedback,kp,ki,kd,'Y')
+	def connect(self):
+		'''Creates connection between TVC Client and Server'''
+		self.s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+		self.s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+		self.s.bind(self.server_address)
+		self.s.listen(1)
 
-        logging.debug("{},X{},{},Y{},{}".format(time(),x_setpoint,x_feedback,y_setpoint,y_feedback))
-        send_packet = "{},{}".format(x_feedback,y_feedback)
-        
-        try:
-            data_send_sock.send(send_packet)
-            #print "Data Sent"
-        except socket.error as e:
-            print e     
+		self.conn,addr = self.s.accept()
+		self.conn.setblocking(0) #Makes a nonblocking socket
 
 
-        if msg:
+	def get_data(self):
+		'''Get data from client's socket'''
 
-            logging.info("Order received. Message is {}".format(msg))
+		try: 
+			data = self.conn.recv(1024)
+			if len(data) > 1:
+				return data
+		except socket.error as e:
+			pass
 
-            if msg[0] == "X":
+	def send_data(self):
+		'''Send position data back to client'''
 
-                try: 
-                    x_setpoint = float(msg[1:]) #Strip header from messag, and cast to float
-                except ValueError as e: 
-                    logging.info("Couldn't read setpoint. Probably sent a blank message through the client")
+		x_feedback,y_feedback = self.read_adc()
+		send_packet = str(x_feedback)+","+str(y_feedback)
+		self.conn.send(send_packet)
 
-            if msg[0] == "Y":
+	def read_adc(self):
+		'''Read the ADC feedbacks'''
 
-                try: 
-                    y_setpoint = float(msg[1:])#Strip header from message, and cast to float
-                except ValueError as e: 
-                    logging.info("Couldn't read setpoint. Probably sent a blank message through the client") 
+		x_feedback = self.adc.read_voltage(1)
+		y_feedback = self.adc.read_voltage(2)
 
-            if msg[0] == 'Z':
+		x_feedback = self.feedback_map(x_feedback)
+		y_feedback = self.feedback_map(y_feedback)
 
-                x_setpoint = 0.0
-                y_setpoint = 0.0
+		return x_feedback,y_feedback
 
-            if msg[0] == "P":
+	def run_PID(self,setpoint,feedback,motor):
+		'''Update the x_PID and y_PID objects'''
 
-                logging.info("Plus Routine Started")
+		motor.SetPoint = setpoint 
+		motor.update(feedback)
+		output = motor.output
 
+		if output > self.max_speed:
+			output = self.max_speed
+		if output < self.min_speed: 
+			output = self.min_speed
 
+		return int(output)
 
-                    
-            if msg[0] == "C": #XMax Ymax
+	def move_motors(self,speed,motor):
+		'''Move one motor at speed'''
 
-                logging.info("XMax YMax Routine Started") 
+		if motor == 'X':
+			roboclaw.DutyM1M2(self.address,-speed,0) #Need this minus sign, for mixed wiring 
+		elif motor == 'Y':
+			roboclaw.DutyM1M2(self.address,0,speed)
 
-                #First zeroing both: 
+	def stop_moving(self):
+		'''Stops both motors'''
 
-                x_setpoint = 0.0
-                y_setpoint = 0.0
+		roboclaw.DutyM1M2(self.address,0,0)
 
-                one_setpoint(x_setpoint,x_feedback,kp,ki,kd,'X')
-                one_setpoint(y_setpoint,y_feedback,kp,ki,kd,'Y')
+	def zero_motors(self):
+		'''Move motors to zero point'''
 
-                sleep(3) #Wait for actuators to zero out. 
+		feedbacks = self.read_adc()
+		x_SP = self.x_zero
+		y_SP = self.y_zero
+		x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
+		y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
 
-                #First do the X actuator
+		while (abs(x_output) > self.output_error_range or abs(y_output) > self.output_error_range):
 
-                step_length = 50 # The tweakable parameter for distance in setpoints 
+			print x_output,y_output
+			feedbacks = self.read_adc()
+			x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
+			y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
+			roboclaw.DutyM1M2(self.address,-x_output,y_output)
+			self.send_data()
+			self.get_data()
 
-                t = np.linspace(0,4.72,50)
-                for point in t:
+		self.stop_moving()
 
-                    x_feedback = adc.read_voltage(1) 
-                    one_setpoint(point,x_feedback,kp,ki,kd,'X')
-                    logging.debug("{},X{},{},Y{},{}".format(time(),point,x_feedback,y_setpoint,y_feedback))
-                    print "x_feedback is {}, x_setpoint is {},y_feedback is {}, y_setpoint is {}".format(x_feedback,point,y_feedback,y_setpoint)
 
-                t = np.linspace(4.72,0,50)
-                for point in t:
-                    x_feedback = adc.read_voltage(1) 
-                    one_setpoint(point,x_feedback,kp,ki,kd,'X')
-                    logging.debug("{},X{},{},Y{},{}".format(time(),point,x_feedback,y_setpoint,y_feedback))
-                    print "x_feedback is {}, x_setpoint is {},y_feedback is {}, y_setpoint is {}".format(x_feedback,point,y_feedback,y_setpoint)
+	def OneSetpoint(self,setpoint,motor):
 
+		if motor == 'X':
 
-                #Then do the Y actuator
+			feedback = self.read_adc()[0] #grab the X feedback
+			output = self.run_PID(setpoint,feedback,self.x_PID)
+					
+			while abs(output) > self.output_error_range:
 
-                t = np.linspace(0,4.72,50)
-                for point in t:
+				feedback = self.read_adc()[0]
+				output = self.run_PID(setpoint,feedback,self.x_PID)
+				self.move_motors(output,'X')
+				self.send_data()
+				self.get_data()
 
-                    y_feedback = adc.read_voltage(2) 
-                    one_setpoint(point,y_feedback,kp,ki,kd,'Y')
-                    logging.debug("{},X{},{},Y{},{}".format(time(),x_setpoint,x_feedback,point,y_feedback))
-                    print "x_feedback is {}, x_setpoint is {},y_feedback is {}, y_setpoint is {}".format(x_feedback,point,y_feedback,y_setpoint)
+			self.stop_moving()
 
-                t = np.linspace(4.72,0,50)
+		if motor == 'Y':
 
-                for point in t:
-                    y_feedback = adc.read_voltage(2) 
-                    one_setpoint(point,y_feedback,kp,ki,kd,'Y')
-                    logging.debug("{},X{},{},Y{},{}".format(time(),x_setpoint,x_feedback,point,y_feedback))
-                    print "x_feedback is {}, x_setpoint is {},y_feedback is {}, y_setpoint is {}".format(x_feedback,point,y_feedback,y_setpoint)
+			feedback = self.read_adc()[1] #grab the Y feedback
+			output = server.run_PID(setpoint,feedback,self.y_PID)
+					
+			while abs(output) > self.output_error_range:
 
+				feedback = server.read_adc()[1]
+				output = server.run_PID(setpoint,feedback,self.y_PID)
+				self.move_motors(output,'Y')
+				self.send_data()
+				self.get_data()
 
+			self.stop_moving()
 
+	def do_circle(self):
+		#Ymin and max for 7 degree radius: 28,79
+		#Xmin and max for 7 degree radius: 30,82
 
+		t = np.linspace(2*np.pi,0.0,130)
 
+		x_SPs = [25*np.cos(i) + 57 for i in t]
+		y_SPs = [23*np.sin(i) + 56 for i in t]
 
+		self.OneSetpoint(82,'X')
 
+		print "Waiting"
 
+		time.sleep(1)
 
+		for i in range(len(t)):
 
+			feedbacks = self.read_adc()
+			x_output = self.run_PID(x_SPs[i],feedbacks[0],self.x_PID)
+			y_output = self.run_PID(y_SPs[i],feedbacks[1],self.y_PID)
+			roboclaw.DutyM1M2(self.address,-x_output,y_output)
+			#self.send_data()
+			#print "xsp = {}, xout = {},yout = {} i = {}".format(x_SPs[i],x_output,y_SPs[i],i)
+			#print feedbacks
+		#if feedbacks[0] 
+		self.stop_moving()
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+if __name__ == '__main__':
 
-                
+	#Some initializations
 
+	
+	server = TVCServer()
 
-'''
-Comment Graveyard
+	print "Attempting Connection"
+	server.connect()
+	print "Connection Established"
 
-Create Pipes for messaging back and forth. False argument means one-way communication.
-x_recv_end, x_send_end = multiprocessing.Pipe(False)
-y_recv_end, y_send_end = multiprocessing.Pipe(False)
+	while 1:
 
-x_temp = x_recv_end.recv()
-y_temp = y_recv_end.recv()
+		server.send_data()
+		data = server.get_data()
 
-x_results = x_temp[0]
-y_results = y_temp[0]
+		if not data:
+			pass
 
-x_setpoints = x_temp[1]
-y_setpoints = y_temp[1]
-'''
+		elif data[0] == 'X':
 
-            
-    
+			setpoint = float(data[1:]) #Strip Header, convert to float
+			server.OneSetpoint(setpoint,"X")
+
+		elif data[0] == 'Y':
+
+			setpoint = float(data[1:]) #Strip Header, Convert to float
+			server.OneSetpoint(setpoint,"Y")
+
+		elif data[0] == 'Z':
+
+			server.zero_motors()
+
+		elif data[0] == 'P':
+			'''Do plus sign routine'''
+
+			server.zero_motors()
+
+			for point in [30,82,server.x_zero]:
+				server.OneSetpoint(point,'X')
+
+			for point in [28,79,server.y_zero]:
+				server.OneSetpoint(point,'Y')
+
+		elif data[0] == 'C':
+
+			server.do_circle()
+			time.sleep(0.2)
+			server.zero_motors()
+
+		elif data[0] == 'G':
+
+			server.x_PID.setKp() #Gainz boyz
+
+
+
+
+
+
+
