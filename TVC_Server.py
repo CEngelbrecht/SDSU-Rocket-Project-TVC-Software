@@ -6,6 +6,8 @@ import PID
 import socket
 import numpy as np 
 import time
+import logging 
+import threading
 
 class TVCServer():
 
@@ -59,10 +61,10 @@ class TVCServer():
 		self.y_PID.setSampleTime(sample_time)
 
 		#Zero point for actuators to balance motor
-		self.x_zero = 57 #Experimentally defined
-		self.y_zero = 56 
+		self.x_zero = 54 #Experimentally defined
+		self.y_zero = 51 
 
-		self.output_error_range = 1000
+		self.output_error_range = 1500
 
 	def feedback_map(self,raw_feedback):
 		'''Scales raw ADC feedback between 0 and 100'''
@@ -71,8 +73,30 @@ class TVCServer():
 
 		return self.mapped_min + (scale_factor*self.mapped_span)
 
+	def send_gains(self):
+		'''Sends current gain info to client'''
+		x_kp = self.x_PID.Kp
+		x_ki = self.x_PID.Ki
+		x_kd = self.x_PID.Kd 
+
+		y_kp = self.y_PID.Kp
+		y_ki = self.y_PID.Ki
+		y_kd = self.y_PID.Kd
+
+		msg = str(x_kp)+','+str(x_ki)+','+str(x_kd)+','+str(y_kp)+','+str(y_ki)+','+str(y_kd)
+
+		msg = 'G'+str(msg)+'GEnd' #Attach header and footer to message
+
+		try:
+			self.conn.send(msg)
+			print msg+'sent'
+
+		except socket.error as e:
+			print e
+
 	def connect(self):
 		'''Creates connection between TVC Client and Server'''
+
 		self.s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 		self.s.bind(self.server_address)
@@ -148,7 +172,6 @@ class TVCServer():
 
 		while (abs(x_output) > self.output_error_range or abs(y_output) > self.output_error_range):
 
-			print x_output,y_output
 			feedbacks = self.read_adc()
 			x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
 			y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
@@ -164,16 +187,18 @@ class TVCServer():
 		if motor == 'X':
 
 			feedback = self.read_adc()[0] #grab the X feedback
-			output = self.run_PID(setpoint,feedback,self.x_PID)
+			output = self.run_PID(setpoint,feedback,self.x_PID) #Update the PID, receive an output 
 					
-			while abs(output) > self.output_error_range:
+			while abs(output) > self.output_error_range: #Move until error is acceptable.
 
-				feedback = self.read_adc()[0]
-				output = self.run_PID(setpoint,feedback,self.x_PID)
+				x_feedback,y_feedback = self.read_adc()
+				output = self.run_PID(setpoint,x_feedback,self.x_PID)
 				self.move_motors(output,'X')
 				self.send_data()
-				self.get_data()
-
+				print output,setpoint
+				self.get_data() #FIX THIS!!!
+				#self.log_positions_file()
+	
 			self.stop_moving()
 
 		if motor == 'Y':
@@ -183,22 +208,27 @@ class TVCServer():
 					
 			while abs(output) > self.output_error_range:
 
-				feedback = server.read_adc()[1]
-				output = server.run_PID(setpoint,feedback,self.y_PID)
+				x_feedback,y_feedback = self.read_adc()
+				output = server.run_PID(setpoint,y_feedback,self.y_PID)
+				print output,setpoint
 				self.move_motors(output,'Y')
 				self.send_data()
 				self.get_data()
+				#self.log_positions_file()
 
 			self.stop_moving()
 
 	def do_circle(self):
-		#Ymin and max for 7 degree radius: 28,79
+		#Ymin and max for 7 degree radius: 28,79 #These are deprecated
 		#Xmin and max for 7 degree radius: 30,82
 
-		t = np.linspace(2*np.pi,0.0,130)
+		#YMax: 74 ,23, 51 is zero: #Use these calibrations
+		#XMax: 54 is zero, 79,27
 
-		x_SPs = [25*np.cos(i) + 57 for i in t]
-		y_SPs = [23*np.sin(i) + 56 for i in t]
+		t = np.linspace(2*np.pi,0.0,110)
+
+		x_SPs = [25*np.cos(i) + 54 for i in t]
+		y_SPs = [23*np.sin(i) + 51 for i in t]
 
 		self.OneSetpoint(82,'X')
 
@@ -212,70 +242,105 @@ class TVCServer():
 			x_output = self.run_PID(x_SPs[i],feedbacks[0],self.x_PID)
 			y_output = self.run_PID(y_SPs[i],feedbacks[1],self.y_PID)
 			roboclaw.DutyM1M2(self.address,-x_output,y_output)
-			#self.send_data()
-			#print "xsp = {}, xout = {},yout = {} i = {}".format(x_SPs[i],x_output,y_SPs[i],i)
-			#print feedbacks
-		#if feedbacks[0] 
-		self.stop_moving()
+			#self.log_setpoints_to_file(feedbacks)
+			self.log_positions_to_file(feedbacks)
+			self.send_data() 
+			print "xFB = {},yFB ={},xSP = {},ySP = {},".format(feedbacks[0],feedbacks[1],x_SPs[i],y_SPs[i])
+		#self.stop_moving()
+
+	def log_positions_to_file(self,feedbacks):
+		
+		logging.debug("{},{},{}".format(time.time(),feedbacks[0],feedbacks[1]))
+
+	def log_setpoints_to_file(self_setpoint):
+		pass
+		#logging.debug("{},{},{}".format(time.time()))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if __name__ == '__main__':
 
-	#Some initializations
+	file_name = 'positions_'+time.strftime("%Y%m%d%H%M%S",time.localtime())+'.log'
+	logging.basicConfig(filename=file_name,level=logging.DEBUG,filemode = 'wr+') #wb overwrites
 
-	
 	server = TVCServer()
-
-	print "Attempting Connection"
-	server.connect()
-	print "Connection Established"
 
 	while 1:
 
-		server.send_data()
-		data = server.get_data()
+		try: 
 
-		if not data:
-			pass
+			print "Attempting Connection"
+			server.connect() #This blocks unitl connection is serveruccessful 
+			print "Connection Established"
+			#gain_thread.start()
 
-		elif data[0] == 'X':
+			while 1:
+				feedbacks = server.read_adc()
+				server.log_positions_to_file(feedbacks)
+				server.send_data()
+				data = server.get_data()
 
-			setpoint = float(data[1:]) #Strip Header, convert to float
-			server.OneSetpoint(setpoint,"X")
+				if not data:
+					pass
 
-		elif data[0] == 'Y':
+				elif data[0] == 'X':
 
-			setpoint = float(data[1:]) #Strip Header, Convert to float
-			server.OneSetpoint(setpoint,"Y")
+					setpoint = float(data[1:]) #Strip Header, convert to float
+					server.OneSetpoint(setpoint,"X")
 
-		elif data[0] == 'Z':
+				elif data[0] == 'Y':
 
-			server.zero_motors()
+					setpoint = float(data[1:]) #Strip Header, Convert to float
+					server.OneSetpoint(setpoint,"Y")
 
-		elif data[0] == 'P':
-			'''Do plus sign routine'''
+				elif data[0] == 'Z':
 
-			server.zero_motors()
+					server.zero_motors()
 
-			for point in [30,82,server.x_zero]:
-				server.OneSetpoint(point,'X')
+				elif data[0] == 'P':
+					'''Do plus sign routine'''
 
-			for point in [28,79,server.y_zero]:
-				server.OneSetpoint(point,'Y')
+					server.zero_motors()
 
-		elif data[0] == 'C':
+					for point in [30,82,server.x_zero]:
+						server.OneSetpoint(point,'X')
 
-			server.do_circle()
-			time.sleep(0.2)
-			server.zero_motors()
+					for point in [28,79,server.y_zero]:
+						server.OneSetpoint(point,'Y')
 
-		elif data[0] == 'G':
+				elif data[0] == 'C':
 
-			server.x_PID.setKp() #Gainz boyz
+					server.do_circle()
+					time.sleep(0.4)
+					server.zero_motors()
 
+				elif data[0] == 'G':
+					'''Set new gains'''
+					
+					gains = []
+					msg = data[1:-1]#Strip Header 
+					
+					for i in msg.split(','):
+						gains.append(float(i)) #Extract info
+					print 'New gains from client are {}'.format(gains)
+					print 'Message is {}'.format(msg)
+					print 'Data is {}'.format(data)
 
+					if data[-1] == 'X':
+						print 'Setting new X Gains'+str(gains)
+						server.x_PID.setKp(gains[0])
+						server.x_PID.setKi(gains[1])
+						server.x_PID.setKd(gains[2])
 
+					elif data[-1] == 'Y':
+						server.y_PID.setKp(gains[0])
+						server.y_PID.setKi(gains[1])
+						server.y_PID.setKd(gains[2])
 
+				elif data[0] == 'L':
 
+					#gain_thread = threading.Thread(target = server.get_gains())
+					server.send_gains()
 
-
+		except socket.error as e:
+				#Catches a connection error 
+				print "Connection Error. Attempting reset..." 
