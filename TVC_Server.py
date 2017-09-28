@@ -64,7 +64,8 @@ class TVCServer():
 		self.x_zero = 54 #Experimentally defined
 		self.y_zero = 51 
 
-		self.output_error_range = 1500
+		self.x_output_error_range = 1500
+		self.y_output_error_range = 1000
 
 	def feedback_map(self,raw_feedback):
 		'''Scales raw ADC feedback between 0 and 100'''
@@ -89,7 +90,6 @@ class TVCServer():
 
 		try:
 			self.conn.send(msg)
-			print msg+'sent'
 
 		except socket.error as e:
 			print e
@@ -170,15 +170,15 @@ class TVCServer():
 		x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
 		y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
 
-		while (abs(x_output) > self.output_error_range or abs(y_output) > self.output_error_range):
+		while (abs(x_output) > self.x_output_error_range or abs(y_output) > self.y_output_error_range):
 
 			feedbacks = self.read_adc()
 			x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
 			y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
-			roboclaw.DutyM1M2(self.address,-x_output,y_output)
-			self.send_data()
+			roboclaw.DutyM1M2(self.address,-x_output,y_output) #Minus sign is there to compensate for wiring 
+			self.send_data()  
 			self.get_data()
-
+			self.log_to_file(feedbacks,x_SP,y_SP)
 		self.stop_moving()
 
 
@@ -189,15 +189,16 @@ class TVCServer():
 			feedback = self.read_adc()[0] #grab the X feedback
 			output = self.run_PID(setpoint,feedback,self.x_PID) #Update the PID, receive an output 
 					
-			while abs(output) > self.output_error_range: #Move until error is acceptable.
+			while abs(output) > self.x_output_error_range: #Move until error is acceptable.
 
-				x_feedback,y_feedback = self.read_adc()
-				output = self.run_PID(setpoint,x_feedback,self.x_PID)
+				feedbacks = self.read_adc()
+				output = self.run_PID(setpoint,feedbacks[0],self.x_PID)
 				self.move_motors(output,'X')
 				self.send_data()
-				print output,setpoint
-				self.get_data() #FIX THIS!!!
-				#self.log_positions_file()
+				response = self.get_data()
+				if response == 'Z':
+					break
+				self.log_to_file(feedbacks,setpoint,0) #Y SP is zero since the motors are zeroed and X is called first. 
 	
 			self.stop_moving()
 
@@ -206,21 +207,23 @@ class TVCServer():
 			feedback = self.read_adc()[1] #grab the Y feedback
 			output = server.run_PID(setpoint,feedback,self.y_PID)
 					
-			while abs(output) > self.output_error_range:
+			while abs(output) > self.y_output_error_range:
 
-				x_feedback,y_feedback = self.read_adc()
-				output = server.run_PID(setpoint,y_feedback,self.y_PID)
+				feedbacks = self.read_adc()
+				output = server.run_PID(setpoint,feedbacks[1],self.y_PID)
 				print output,setpoint
 				self.move_motors(output,'Y')
 				self.send_data()
-				self.get_data()
-				#self.log_positions_file()
+				response = self.get_data()
+				if response == 'Z':
+					break
+				self.log_to_file(feedbacks,0,setpoint) #Y is done seccond, and X is zeroed, so send 0 setpoint for log for X 
 
 			self.stop_moving()
 
 	def do_circle(self):
-		#Ymin and max for 7 degree radius: 28,79 #These are deprecated
-		#Xmin and max for 7 degree radius: 30,82
+		'''Make the actuators move in a circle'''
+
 
 		#YMax: 74 ,23, 51 is zero: #Use these calibrations
 		#XMax: 54 is zero, 79,27
@@ -242,42 +245,60 @@ class TVCServer():
 			x_output = self.run_PID(x_SPs[i],feedbacks[0],self.x_PID)
 			y_output = self.run_PID(y_SPs[i],feedbacks[1],self.y_PID)
 			roboclaw.DutyM1M2(self.address,-x_output,y_output)
-			#self.log_setpoints_to_file(feedbacks)
-			self.log_positions_to_file(feedbacks)
+			self.log_to_file(feedbacks,x_SPs[i],y_SPs[i])
 			self.send_data() 
-			print "xFB = {},yFB ={},xSP = {},ySP = {},".format(feedbacks[0],feedbacks[1],x_SPs[i],y_SPs[i])
+			#print "xFB = {},yFB ={},xSP = {},ySP = {},".format(feedbacks[0],feedbacks[1],x_SPs[i],y_SPs[i])
 		#self.stop_moving()
 
-	def log_positions_to_file(self,feedbacks):
-		
-		logging.debug("{},{},{}".format(time.time(),feedbacks[0],feedbacks[1]))
+	def move_both(self,setpoints):
+		 #setpoints is a tuple
+		feedbacks = self.read_adc()
+		x_SP = setpoints[0]
+		y_SP = setpoints[1]
 
-	def log_setpoints_to_file(self_setpoint):
-		pass
-		#logging.debug("{},{},{}".format(time.time()))
+		x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
+		y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
+
+		while (abs(x_output) > self.x_output_error_range or abs(y_output) > self.y_output_error_range):
+
+			feedbacks = self.read_adc()
+			x_output = self.run_PID(x_SP,feedbacks[0],self.x_PID)
+			y_output = self.run_PID(y_SP,feedbacks[1],self.y_PID)
+			roboclaw.DutyM1M2(self.address,-x_output,y_output)
+			self.log_to_file(feedbacks,setpoints[0],setpoints[1])
+			self.send_data()
+			print "{},{},{},{}".format(x_output,y_output,feedbacks[0],feedbacks[1])
+
+	def log_to_file(self,feedbacks,x_setpoint,y_setpoint):
+		'''Log positions and setpoints to a file'''
+		
+		logging.debug("{},{},{},{},{}".format(time.time(),feedbacks[0],feedbacks[1],x_setpoint,y_setpoint))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if __name__ == '__main__':
 
-	file_name = 'positions_'+time.strftime("%Y%m%d%H%M%S",time.localtime())+'.log'
+	file_name = 'positions_and_setpoints'+time.strftime("%Y%m%d%H%M%S",time.localtime())+'.log'
 	logging.basicConfig(filename=file_name,level=logging.DEBUG,filemode = 'wr+') #wb overwrites
+	#Time,x_FB,y_FB,x_SP,y_SP
 
-	server = TVCServer()
+	server = TVCServer()	#This instance off the class will be what runs the setpoints and routines 	
 
 	while 1:
 
 		try: 
+			'''Always Zero The Motors after every routine. The logging is dependent on it'''
 
 			print "Attempting Connection"
-			server.connect() #This blocks unitl connection is serveruccessful 
+			server.connect() #This blocks unitl connection is successful 
 			print "Connection Established"
 			#gain_thread.start()
 
 			while 1:
+				server.zero_motors() #Start off in the zero poisition
 				feedbacks = server.read_adc()
-				server.log_positions_to_file(feedbacks)
+				server.log_to_file(feedbacks,server.x_zero,server.y_zero)
 				server.send_data()
-				data = server.get_data()
+				data = server.get_data() # Listen for commands from client
 
 				if not data:
 					pass
@@ -293,6 +314,7 @@ if __name__ == '__main__':
 					server.OneSetpoint(setpoint,"Y")
 
 				elif data[0] == 'Z':
+					'''Zero the positions'''
 
 					server.zero_motors()
 
@@ -300,18 +322,20 @@ if __name__ == '__main__':
 					'''Do plus sign routine'''
 
 					server.zero_motors()
-
+					#Do the X motor first, then do Y. 
 					for point in [30,82,server.x_zero]:
 						server.OneSetpoint(point,'X')
 
 					for point in [28,79,server.y_zero]:
 						server.OneSetpoint(point,'Y')
 
+
 				elif data[0] == 'C':
 
 					server.do_circle()
-					time.sleep(0.4)
+					time.sleep(0.15)
 					server.zero_motors()
+					print "Done Circle"
 
 				elif data[0] == 'G':
 					'''Set new gains'''
@@ -338,8 +362,20 @@ if __name__ == '__main__':
 
 				elif data[0] == 'L':
 
-					#gain_thread = threading.Thread(target = server.get_gains())
 					server.send_gains()
+
+				elif data[0] == 'Q':
+					#Do cross sign, then zero out
+		
+					points_list = [(26,74),(26,23),(79,73),(79,23),(server.x_zero,server.y_zero)]
+
+					for points in points_list:
+						print points
+						server.move_both(points)
+
+					print "Done Cross"
+
+
 
 		except socket.error as e:
 				#Catches a connection error 

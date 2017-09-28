@@ -31,8 +31,7 @@ More information about PID Controller: http://en.wikipedia.org/wiki/PID_controll
 import time
 
 class PID:
-    """PID Controller
-    """
+    """PID Controller"""
 
     def __init__(self, P=0.0, I=0.0, D=0.0):
 

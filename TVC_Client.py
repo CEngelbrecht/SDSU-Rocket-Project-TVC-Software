@@ -109,6 +109,9 @@ class GUI:
 		circle_Button = Tk.Button(master, text = 'Circle',command = lambda:self.send_msg('0','C'))
 		circle_Button.grid(row = 3, column = 1)
 
+		cross_Button = Tk.Button(master, text = 'Cross',command = lambda:self.send_msg('0','Q'))
+		cross_Button.grid(row = 4, column = 0)
+
 		#~~~~~~~~~~~~~~
 		#X Gain Tuning 
 
