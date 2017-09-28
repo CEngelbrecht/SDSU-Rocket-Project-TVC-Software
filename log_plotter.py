@@ -1,3 +1,6 @@
+'''A script that recognized the logs generated from the server code
+and plots them.'''
+
 import csv
 import matplotlib.pyplot as plt
 import re
