@@ -11,5 +11,5 @@ Gimbaling the motor was achieved by placing two linear actuators at 90 degrees t
 
 The GUI seen below was the interface by which the operator could monitor the position of the actuators, using a TKinter based application, with a graph being updated using Matplotlib's funcanimation function. 
 
-![TVC GUI](https://github.com/CEngelbrecht/SDSU-Rocket-Project-TVC-Software/tree/master/Documentation/TVC_GUI.png)
+![TVC GUI](/Documentation/TVC_GUI.png?raw=True)
 
